@@ -19,20 +19,27 @@ let parseTile = function
     | 'S' -> Start
     | char -> failwithf "Invalid tile: %c" char
 
-let isPipeWith direction = 
-    function
+let isPipeWith direction = function
     | Pipe directions when Set.contains direction directions -> true
     | _ -> false
 
+let isStraightPipe = function
+    | Pipe dirs when dirs = set [ North; South ] -> true
+    | Pipe dirs when dirs = set [ East; West ] -> true
+    | _ -> false
+
 let grid =
-    File.ReadAllLines("example4.txt")
+    File.ReadAllLines("input.txt")
     |> Array.map (_.ToCharArray() >> Array.map parseTile)
     |> array2D
 
-let getStart grid =
+let maxY = Array2D.length1 grid - 1
+let maxX = Array2D.length2 grid - 1
+
+let getStart (grid: Tile[,]) =
     seq {
-        for y in 0 .. Array2D.length1 grid - 1 do
-            for x in 0 .. Array2D.length2 grid - 1 do
+        for y = 0 to maxY do
+            for x = 0 to maxX do
                 if grid[y, x] = Start then
                     yield y, x
     } |> Seq.head
@@ -49,15 +56,22 @@ let getStartConnections (grid: Tile[,]) (y, x) =
         then West, (y, x + 1)
     }
 
+let oppositeDirection = function
+    | North -> South
+    | East -> West
+    | South -> North
+    | West -> East
+
+let updateCoords direction (y, x) =
+    match direction with
+    | North -> (y - 1, x)
+    | East -> (y, x + 1)
+    | South -> (y + 1, x)
+    | West -> (y, x - 1)
+
 let getStartTile grid (y, x) =
     getStartConnections grid (y, x)
-    |> Seq.map (fun (dir, _) ->
-        match dir with
-        | North -> South
-        | East -> West
-        | South -> North
-        | West -> East
-    )
+    |> Seq.map (fun (dir, _) -> oppositeDirection dir)
     |> Set.ofSeq
     |> Pipe
 
@@ -68,11 +82,7 @@ let getNextConnection (grid: Tile[,]) incomingDirection (y, x) =
             Set.remove incomingDirection directions 
             |> Set.toSeq
             |> Seq.exactlyOne
-        match outgoingDirection with
-        | North -> South, (y - 1, x)
-        | East -> West, (y, x + 1)
-        | South -> North, (y + 1, x)
-        | West -> East, (y, x - 1)
+        oppositeDirection outgoingDirection, updateCoords outgoingDirection (y, x)
     | _ ->
         failwithf $"Tile at (%d{y}, %d{x}) is not a pipe"
 
@@ -96,3 +106,75 @@ let part1 () =
     List.length (getPipeCoords grid) / 2
 
 printfn "Part 1: %A" (part1 ())
+
+let dirDeg = function
+    | North -> 0
+    | East -> 90
+    | South -> 180
+    | West -> 270
+
+let degDir = function
+    | 0 -> North
+    | 90 -> East
+    | 180 -> South
+    | 270 -> West
+    | other -> failwithf "Not a valid direction: %d" other
+
+let (%%) x m =
+    (x % m + m) % m
+
+let fill (grid: Tile[,]) (pipe: (int * int) list) fillDirection =
+    let (startY, startX) = getStart grid
+    let startTile = getStartTile grid (startY, startX)
+    let grid = Array2D.copy grid
+    grid[startY, startX] <- startTile
+    let isPipe =
+        let pipeSet = set pipe
+        fun (y, x) -> pipeSet |> Set.contains (y, x)
+    
+    let getFill direction (y, x) =
+        let fillRay =
+            match direction with
+            | North -> List.allPairs [y-1..-1..0] [x]
+            | East -> List.allPairs [y] [x+1..maxX]
+            | South -> List.allPairs [y+1..maxY] [x]
+            | West -> List.allPairs [y] [x-1..-1..0]
+        fillRay 
+        |> List.takeWhile (not << isPipe)
+        |> Set.ofList
+
+    let rec walk filled travelDirection fillDirection (y, x) =
+        if (y, x) = (startY, startX) then
+            filled
+        else
+            let filled = getFill fillDirection (y, x) |> Set.union filled
+            let newTravelDirection =
+                match grid[y, x] with
+                | Pipe directions ->
+                    directions 
+                    |> Set.remove (oppositeDirection travelDirection)
+                    |> Set.toSeq
+                    |> Seq.exactlyOne
+                | _ ->
+                    failwithf $"Tile at (%d{y}, %d{x}) is not a pipe"
+            let newFillDirection = (dirDeg newTravelDirection - dirDeg travelDirection + dirDeg fillDirection) %% 360 |> degDir
+            let newCoords = updateCoords newTravelDirection (y, x)
+            let filled = getFill newFillDirection (y, x) |> Set.union filled
+            walk filled newTravelDirection newFillDirection newCoords
+
+    let nextDirection, initCoords =
+        getStartConnections grid (startY, startX)
+        |> Seq.head
+    let initDirection = oppositeDirection nextDirection
+
+    walk Set.empty initDirection (degDir ((dirDeg initDirection + fillDirection) %% 360)) initCoords
+            
+let part2 () =
+    let pipe = getPipeCoords grid
+    let rightFill = fill grid pipe 90
+    if rightFill |> Set.exists (fun (y, x) -> y = 0 || y = maxY || x = 0 || x = maxX) 
+    then fill grid pipe -90
+    else rightFill
+    |> Set.count
+
+printfn "Part 2: %d" (part2 ())
