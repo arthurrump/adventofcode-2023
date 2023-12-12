@@ -22,6 +22,13 @@ let records =
     File.ReadAllLines("input.txt")
     |> Array.map parseRecord
 
+module List =
+    let rec hasPrefix xs ys =
+        match xs, ys with
+        | x::xs, y::ys -> x = y && hasPrefix xs ys
+        | [], _ -> true
+        | _::_, [] -> false
+
 let countDamagedGroups conditions =
     let groups =
         List.fold (fun (group::groups) condition ->
@@ -37,23 +44,44 @@ let countDamagedGroups conditions =
     | 0::rest -> List.rev rest
     | _ -> List.rev groups
 
-let rec allArrangements conditions =
-    match conditions |> List.tryFindIndex (fun c -> c = Unknown) with
-    | Some i ->
-        seq {
-            yield! allArrangements (conditions |> List.updateAt i Operational)
-            yield! allArrangements (conditions |> List.updateAt i Damaged)
-        }
+let rec validArrangements conditionsValidUpto groupsValidCount record =
+    match record.SpringConditions |> List.tryFindIndex (fun c -> c = Unknown) with
+    | Some unknownIndex ->
+        let lastOperationalIndex = 
+            record.SpringConditions[..unknownIndex - 1] 
+            |> List.tryFindIndexBack (fun c -> c = Operational)
+            |> Option.defaultValue 0
+        let newDamagedGroups = 
+            countDamagedGroups record.SpringConditions[conditionsValidUpto..lastOperationalIndex - 1]
+        if record.DamagedGroups |> List.skip groupsValidCount |> List.hasPrefix newDamagedGroups then
+            let groupsValidCount = groupsValidCount + (List.length newDamagedGroups)
+            seq {
+                yield! validArrangements lastOperationalIndex groupsValidCount { record with SpringConditions = record.SpringConditions |> List.updateAt unknownIndex Operational }
+                yield! validArrangements lastOperationalIndex groupsValidCount { record with SpringConditions = record.SpringConditions |> List.updateAt unknownIndex Damaged }
+            }
+        else
+            Seq.empty
     | None ->
-        Seq.singleton conditions
-
-let validArrangements record =
-    allArrangements record.SpringConditions
-    |> Seq.filter (fun conditions -> countDamagedGroups conditions = record.DamagedGroups)
+        if countDamagedGroups record.SpringConditions = record.DamagedGroups
+        then Seq.singleton record.SpringConditions
+        else Seq.empty
 
 let part1 () =
     records
-    |> Array.map (validArrangements >> Seq.length)
+    |> Array.map (validArrangements 0 0 >> Seq.length)
     |> Array.sum
 
 printfn "Part 1: %A" (part1 ())
+
+let unfold record =
+    { SpringConditions = List.concat (List.replicate 4 (record.SpringConditions @ [ Unknown ])) @ record.SpringConditions
+      DamagedGroups = List.concat (List.replicate 5 record.DamagedGroups) }
+
+let tee f x = f x; x
+
+let part2 () =
+    records
+    |> Array.Parallel.map (unfold >> validArrangements 0 0 >> Seq.length >> tee (printfn "%d") >> bigint)
+    |> Array.sum
+
+printfn "Part 2: %A" (part2 ())
