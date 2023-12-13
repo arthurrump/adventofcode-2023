@@ -1,11 +1,12 @@
 ﻿open System
 open System.IO
+open System.Collections.Generic
 
 type Condition = Operational | Damaged | Unknown
 
 type ConditionRecord =
-    { SpringConditions: Condition list
-      DamagedGroups: int list }
+    { Springs: Condition list
+      Chunks: int list }
 
 let parseCondition = function
     | '.' -> Operational
@@ -14,74 +15,60 @@ let parseCondition = function
     | _ -> failwith "Invalid condition"
 
 let parseRecord (line: string) =
-    let [| conditions; groups |] = line.Split(" ")
-    { SpringConditions = conditions.ToCharArray() |> Array.map parseCondition |> Array.toList 
-      DamagedGroups = groups.Split(",") |> Array.map Int32.Parse |> Array.toList }
+    let [| springs; chunks |] = line.Split(" ")
+    { Springs = springs.ToCharArray() |> Array.map parseCondition |> Array.toList 
+      Chunks = chunks.Split(",") |> Array.map Int32.Parse |> Array.toList }
 
 let records =
     File.ReadAllLines("input.txt")
     |> Array.map parseRecord
 
-module List =
-    let rec hasPrefix xs ys =
-        match xs, ys with
-        | x::xs, y::ys -> x = y && hasPrefix xs ys
-        | [], _ -> true
-        | _::_, [] -> false
+// With some help from https://www.youtube.com/watch?v=g3Ms5e7Jdqo
+let countArrangements =
+    let cache = Dictionary<_, _>()
 
-let countDamagedGroups conditions =
-    let groups =
-        List.fold (fun (group::groups) condition ->
-            match condition with
-            | Operational | Unknown when group = 0 ->
-                group::groups
-            | Operational | Unknown ->
-                0::group::groups
-            | Damaged -> 
-                (group + 1)::groups
-        ) [ 0 ] conditions
-    match groups with
-    | 0::rest -> List.rev rest
-    | _ -> List.rev groups
+    let rec count (springs, chunks) =
+        match cache.TryGetValue((springs, chunks)) with
+        | true, result ->
+            result
+        | false, _ ->
+            let result =
+                match springs, chunks with
+                | [], [] -> 1I
+                | [], _ -> 0I
+                | springs, [] when List.forall ((<>) Damaged) springs -> 1I
+                | _, [] -> 0I
+                | Operational::springs, chunks ->
+                    count (springs, chunks)
+                | Damaged::_ as springs, n::chunks ->
+                    if List.length springs >= n 
+                        && List.take n springs |> List.forall ((<>) Operational) 
+                        && (List.length springs = n || springs[n] <> Damaged) 
+                    then count ((if List.length springs = n then List.empty else List.skip (n + 1) springs), chunks)
+                    else 0I
+                | Unknown::springs, chunks ->
+                    count (Operational::springs, chunks) + count (Damaged::springs, chunks)
+            cache.Add((springs, chunks), result)
+            result
 
-let rec validArrangements conditionsValidUpto groupsValidCount record =
-    match record.SpringConditions |> List.tryFindIndex (fun c -> c = Unknown) with
-    | Some unknownIndex ->
-        let lastOperationalIndex = 
-            record.SpringConditions[..unknownIndex - 1] 
-            |> List.tryFindIndexBack (fun c -> c = Operational)
-            |> Option.defaultValue 0
-        let newDamagedGroups = 
-            countDamagedGroups record.SpringConditions[conditionsValidUpto..lastOperationalIndex - 1]
-        if record.DamagedGroups |> List.skip groupsValidCount |> List.hasPrefix newDamagedGroups then
-            let groupsValidCount = groupsValidCount + (List.length newDamagedGroups)
-            seq {
-                yield! validArrangements lastOperationalIndex groupsValidCount { record with SpringConditions = record.SpringConditions |> List.updateAt unknownIndex Operational }
-                yield! validArrangements lastOperationalIndex groupsValidCount { record with SpringConditions = record.SpringConditions |> List.updateAt unknownIndex Damaged }
-            }
-        else
-            Seq.empty
-    | None ->
-        if countDamagedGroups record.SpringConditions = record.DamagedGroups
-        then Seq.singleton record.SpringConditions
-        else Seq.empty
+    fun record -> count (record.Springs, record.Chunks)
 
 let part1 () =
     records
-    |> Array.map (validArrangements 0 0 >> Seq.length)
+    |> Array.map countArrangements
     |> Array.sum
 
 printfn "Part 1: %A" (part1 ())
 
 let unfold record =
-    { SpringConditions = List.concat (List.replicate 4 (record.SpringConditions @ [ Unknown ])) @ record.SpringConditions
-      DamagedGroups = List.concat (List.replicate 5 record.DamagedGroups) }
+    { Springs = List.concat (List.replicate 4 (record.Springs @ [ Unknown ])) @ record.Springs
+      Chunks = List.concat (List.replicate 5 record.Chunks) }
 
 let tee f x = f x; x
 
 let part2 () =
     records
-    |> Array.Parallel.map (unfold >> validArrangements 0 0 >> Seq.length >> tee (printfn "%d") >> bigint)
+    |> Array.map (unfold >> countArrangements)
     |> Array.sum
 
 printfn "Part 2: %A" (part2 ())
