@@ -3,7 +3,7 @@ open System.Collections.Generic
 open System.IO
 
 let city =
-    File.ReadAllLines("example.txt")
+    File.ReadAllLines("input.txt")
     |> Array.map (_.ToCharArray() >> Array.map (fun ch -> int ch - int '0'))
     |> array2D
 
@@ -22,80 +22,83 @@ let cityGraph =
             (y, x), edges ]
     |> Map.ofList
 
-let dijkstra (start: 'n) (dest: 'n) (graph: Map<'n, (int * 'n) list>) =
-    let folder (dist: int, path: 'n list) (unvisited: PriorityQueue<'n, int>, distances: Map<'n, int>, paths: Map<'n, 'n list>) (edge: int, neighbour: 'n) =
-        let dist = dist + edge
-        match distances |> Map.tryFind neighbour with
-        | Some d when d > dist ->
-            unvisited.Enqueue(neighbour, dist)
-            unvisited,
-            distances |> Map.add neighbour dist, 
-            paths |> Map.add neighbour path
-        | Some _ ->
-            unvisited, distances, paths
-        | None ->
-            unvisited.Enqueue(neighbour, dist)
-            unvisited,
-            distances |> Map.add neighbour dist, 
-            paths |> Map.add neighbour path
-    
-    let rec dijkstra (unvisited: PriorityQueue<'n, int>) (distances: Map<'n, int>) (paths: Map<'n, 'n list>) =
-        let current = unvisited.Dequeue()
-        if current = dest then 
-            distances[current], List.rev paths[current]
-        else
-            let currentDist = distances[current]
-            let path = current :: paths[current]
-            let unvisited, distances, paths =
-                graph[current] 
-                |> List.fold (folder (currentDist, path)) (unvisited, distances, paths)   
-            dijkstra unvisited distances paths
-    
-    let unvisited = PriorityQueue()
-    unvisited.Enqueue(start, 0)
-    let distances = Map.ofList [ start, 0 ]
-    let paths = Map.ofList [ start, [] ]
-    dijkstra unvisited distances paths
+type Direction = North | East | South | West
 
+module Direction =
+    let turns = function
+        | North | South -> [ East; West ]
+        | East | West -> [ North; South ]
 
-// The shortest path problem with forbidden paths
-// https://doi.org/10.1016/j.ejor.2004.01.032
-let martinsTransform t path (graph: Map<'n, (int * 'n) list>) =
-    [ for (i, from), (j, to') in path |> List.indexed |> List.pairwise do
-        if i = 0 then
-            yield Map.add from (graph[from] |> List.map (fun (edge, neighbour) -> edge, if neighbour = to' then t neighbour else neighbour))
-        elif j = List.length path - 1 then
-            yield Map.add (t from) (graph[from] |> List.filter (fun (_, neighbour) -> neighbour <> to'))
-        else
-            let edge = graph[from] |> List.pick (fun (edge, neighbour) -> if neighbour = to' then Some edge else None)
-            yield Map.add (t from) ((edge, t to') :: (graph[from] |> List.filter (fun (_, neighbour) -> neighbour <> to'))) ]
-    |> List.fold (fun graph f -> f graph) graph
+    let straightOrTurns dir = 
+        dir :: turns dir
 
-let searchValidPath start dest isValid transformNode transformNode' graph =
-    let rec search i currentGraph =
-        let dist, path = dijkstra start dest currentGraph
-        let path' = List.map transformNode' path
-        if isValid path'
-        then dist, path'
-        else 
-            printfn $"%d{i}: %d{dist} %A{path'}"
-            search (i + 1) (martinsTransform transformNode path currentGraph)
-    search 0 graph
+    let move (y, x) = function
+        | North -> (y - 1, x)
+        | East -> (y, x + 1)
+        | South -> (y + 1, x)
+        | West -> (y, x - 1)
 
-let transformNode (y, x) =
-    (y + maxY + 1, x + maxX + 1)
+type State =
+    { Location: int * int
+      Direction: Direction
+      StraightMoves: int }
 
-let transformNode' (y, x) =
-    (y % (maxY + 1), x % (maxX + 1))
+let neighbours state =
+    let newDirections =
+        if state.StraightMoves < 2
+        then Direction.straightOrTurns state.Direction
+        else Direction.turns state.Direction
+    [ for dir in newDirections do
+        let (y, x) = Direction.move state.Location dir
+        if 0 <= y && y <= maxY && 0 <= x && x <= maxX then
+            { Location = (y, x)
+              Direction = dir
+              StraightMoves = if dir = state.Direction then state.StraightMoves + 1 else 0 } ]
 
-let isValidPath path =
-    path 
-    |> List.windowed 4 
-    |> List.forall (fun window -> 
-        List.map fst window |> List.distinct |> List.length <> 1
-        && List.map snd window |> List.distinct |> List.length <> 1)
+let dijkstra start dest (city: int[,]) =
+    let unvisited = PriorityQueue<State, int>()
+    let distances = Dictionary<State, int>()
+    let paths = Dictionary<State, State list>()
+    let mutable current = { Location = start; Direction = East; StraightMoves = 0 }
+    distances.Add(current, 0)
+    unvisited.Enqueue(current, 0)
+    paths.Add(current, [])
+    while current.Location <> dest do
+        current <- unvisited.Dequeue()
+        let dist = distances[current]
+        for neighbour in neighbours current do
+            let (ny, nx) = neighbour.Location
+            let edge = city[ny, nx]
+            let dist = dist + edge
+            match distances.TryGetValue(neighbour) with
+            | true, d ->
+                if dist < d then
+                    distances[neighbour] <- dist
+                    paths[neighbour] <- current::paths[current]
+                    unvisited.Enqueue(neighbour, dist)
+            | false, _ ->
+                distances[neighbour] <- dist
+                paths[neighbour] <- current::paths[current]
+                unvisited.Enqueue(neighbour, dist)
+                
+    distances[current], List.rev (current::paths[current])
 
 let part1 () =
-    searchValidPath (0, 0) (maxY, maxX) isValidPath transformNode transformNode' cityGraph
+    let heatLoss, path = dijkstra (0, 0) (maxY, maxX) city
+
+    // let pathMap = path |> List.map (fun state -> state.Location, state.Direction) |> Map.ofList
+    // for y = 0 to maxY do
+    //     for x = 0 to maxX do
+    //         Map.tryFind (y, x) pathMap
+    //         |> function
+    //            | None -> char city[y, x] + '0'
+    //            | Some North -> '^'
+    //            | Some East -> '>'
+    //            | Some West -> '<'
+    //            | Some South -> 'v'
+    //         |> printf "%c"
+    //     printfn ""
+
+    heatLoss
 
 printfn "Part 1: %A" (part1 ())
