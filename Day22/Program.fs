@@ -9,6 +9,10 @@ module Brick =
         let fall = brick.Low.Z - z
         { brick with Low.Z = z; High.Z = brick.High.Z - fall }
 
+    let overlapsXY b1 b2 =
+        b1.Low.X <= b2.High.X && b1.High.X >= b2.Low.X &&
+        b1.Low.Y <= b2.High.Y && b1.High.Y >= b2.Low.Y
+
 let parsePoint (point: string) =
     let [| x; y; z |] = point.Split(",")
     { X = Int32.Parse x; Y = Int32.Parse y; Z = Int32.Parse z }
@@ -20,7 +24,7 @@ let parseBrick (line: string) =
 let bricks =
     File.ReadAllLines("input.txt")
     |> Array.map parseBrick
-    // |> Array.sortBy (_.Low >> Point.z)
+    |> Array.sortBy _.Low.Z
 
 let minX = bricks |> Array.map _.Low.X |> Array.min
 let maxX = bricks |> Array.map _.High.X |> Array.max
@@ -46,22 +50,23 @@ let fall bricks =
     Array.mapFold fallBrick zMap bricks
     |> fst
 
+let getSupported bricks =
+    let byLowZ = bricks |> Array.groupBy _.Low.Z |> Map.ofArray
+    fun brick -> 
+        Map.tryFind (brick.High.Z + 1) byLowZ
+        |> Option.defaultValue Array.empty
+        |> Array.filter (Brick.overlapsXY brick)
+
+let getSupports bricks =
+    let byHighZ = bricks |> Array.groupBy _.High.Z |> Map.ofArray
+    fun brick ->
+        Map.tryFind (brick.Low.Z - 1) byHighZ
+        |> Option.defaultValue Array.empty
+        |> Array.filter (Brick.overlapsXY brick)
+
 let findDisintegratable bricks =
-    let overlapsXY b1 b2 =
-        b1.Low.X <= b2.High.X && b1.High.X >= b2.Low.X &&
-        b1.Low.Y <= b2.High.Y && b1.High.Y >= b2.Low.Y
-    let getSupported =
-        let byLowZ = bricks |> Array.groupBy _.Low.Z |> Map.ofArray
-        fun brick -> 
-            Map.tryFind (brick.High.Z + 1) byLowZ
-            |> Option.defaultValue Array.empty
-            |> Array.filter (overlapsXY brick)
-    let getSupports =
-        let byHighZ = bricks |> Array.groupBy _.High.Z |> Map.ofArray
-        fun brick ->
-            Map.tryFind (brick.Low.Z - 1) byHighZ
-            |> Option.defaultValue Array.empty
-            |> Array.filter (overlapsXY brick)
+    let getSupported = getSupported bricks
+    let getSupports = getSupports bricks
     [ for brick in bricks do
         let supported = getSupported brick
         if Array.isEmpty supported then
@@ -75,3 +80,21 @@ let part1 () =
     |> List.length
 
 printfn "Part 1: %A" (part1 ())
+
+let wouldFall bricks =
+    let getSupports = getSupports bricks
+    fun disintegrated ->
+        bricks
+        |> Array.fold (fun fallen brick -> 
+            let supports = set (getSupports brick)
+            if not (Set.isEmpty supports) &&  Set.isSubset supports fallen
+            then Set.add brick fallen
+            else fallen
+        ) (Set.singleton disintegrated)
+        |> Set.remove disintegrated
+
+let part2 () =
+    let bricks = fall bricks
+    Array.sumBy (wouldFall bricks >> Set.count) bricks
+
+printfn "Part 2: %A" (part2 ())
