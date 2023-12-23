@@ -31,65 +31,83 @@ let neighbours (y, x) =
           if x < maxX then (y, x + 1) ]
     |> List.filter (fun (y, x) -> trailMap[y, x] <> '#')
 
-// Opposite of Dijkstra's: longest simple path
-let artskjid start dest neighbours =
-    let unvisited = PriorityQueue<'n, int>({ new IComparer<int> with member _.Compare(a, b) = -1 * compare a b })
-    let distances = Dictionary<'n, int>()
-    let seen = Dictionary<'n, Set<'n>>()
-    let mutable current = start
-    distances.Add(start, 0)
-    unvisited.Enqueue(start, 0)
-    seen.Add(start, Set.empty)
-    while unvisited.Count > 0 do
-        current <- unvisited.Dequeue()
-        let dist' = distances[current] + 1
-        let seen' = Set.add current seen[current]
-        let neighbours = 
+let knotGraph start dest neighbours =
+    let rec walkToKnotOrDest steps previous current =
+        if current = dest then
+            Some (current, steps)
+        else
+            match neighbours current |> List.filter ((<>) previous) with
+            | [] -> None
+            | [ next ] -> walkToKnotOrDest (steps + 1) current next
+            | _ -> Some (current, steps)
+
+    let seen = HashSet()
+    let graph = Dictionary()
+    let queue = Queue([ start ])
+
+    while queue.Count > 0 do
+        let current = queue.Dequeue()
+        let edges =
+            neighbours current 
+            |> List.choose (walkToKnotOrDest 1 current)
+        
+        graph.Add(current, edges)
+        assert seen.Add(current)
+        for n, _ in edges do
+            if not (seen.Contains n || queue.Contains n) then
+                queue.Enqueue(n)
+
+    graph
+
+let allPaths start dest neighbours =
+    let rec walk dist seen current =
+        if current = dest then
+            Seq.singleton (dist, seen)
+        else    
+            let seen = Set.add current seen
             neighbours current
-            |> List.filter (fun n -> not (Set.contains n seen'))
-        for neighbour in neighbours do
-            match distances.TryGetValue neighbour with
-            | true, d ->
-                if dist' > d then
-                    distances[neighbour] <- dist'
-                    seen[neighbour] <- seen'
-                    unvisited.Enqueue(neighbour, dist')
-            | false, _ ->
-                distances[neighbour] <- dist'
-                seen[neighbour] <- seen'
-                unvisited.Enqueue(neighbour, dist')
-    distances[dest], Set.add dest seen[dest]
+            |> Seq.filter (fun (n, _) -> not (Set.contains n seen))
+            |> Seq.collect (fun (n, d) -> walk (dist + d) seen n)
+    walk 0 Set.empty start
 
 let printPath neighbours seen =
+    printf " "
+    for x = 0 to maxX do
+        printf "%d" (x % 10)
+    printfn ""
     for y = 0 to maxY do
+        printf "%d" (y % 10)
         for x = 0 to maxX do
             if trailMap[y, x] <> '#' && neighbours (y, x) |> List.length > 2 then
                 Console.BackgroundColor <- ConsoleColor.Red
             elif seen |> Set.contains (y, x) then
                 Console.BackgroundColor <- ConsoleColor.Green
-
             printf "%c" trailMap[y, x]
-
             Console.ResetColor()
         printfn ""
 
 let part1 () =
-    artskjid start dest neighbours
-    |> tee (snd >> printPath neighbours)
-    |> fst
+    let kng = knotGraph start dest neighbours
+    allPaths start dest (fun pos -> kng[pos])
+    |> Seq.map fst
+    |> Seq.max
 
 printfn "Part 1: %A" (part1 ())
 
 let neighbours2 (y, x) =
-    [ if y > 0 then (y - 1, x)
-      if y < maxY then (y + 1, x)
-      if x > 0 then (y, x - 1)
-      if x < maxX then (y, x + 1) ]
+    match trailMap[y, x] with
+    | '#' -> []
+    | _ ->
+        [ if y > 0 then (y - 1, x)
+          if y < maxY then (y + 1, x)
+          if x > 0 then (y, x - 1)
+          if x < maxX then (y, x + 1) ]
     |> List.filter (fun (y, x) -> trailMap[y, x] <> '#')
 
 let part2 () =
-    artskjid start dest neighbours2
-    |> tee (snd >> printPath neighbours2)
-    |> fst
+    let kng = knotGraph start dest neighbours2
+    allPaths start dest (fun pos -> kng[pos])
+    |> Seq.map fst
+    |> Seq.max
 
 printfn "Part 2: %A" (part2 ())
