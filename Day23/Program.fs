@@ -31,21 +31,52 @@ let neighbours (y, x) =
           if x < maxX then (y, x + 1) ]
     |> List.filter (fun (y, x) -> trailMap[y, x] <> '#')
 
-let allPaths start dest neighbours =
-    let rec walk seen current =
-        if current = dest then
-            Seq.singleton seen
-        else    
-            let seen = Set.add current seen
+// Opposite of Dijkstra's: longest simple path
+let artskjid start dest neighbours =
+    let unvisited = PriorityQueue<'n, int>({ new IComparer<int> with member _.Compare(a, b) = -1 * compare a b })
+    let distances = Dictionary<'n, int>()
+    let seen = Dictionary<'n, Set<'n>>()
+    let mutable current = start
+    distances.Add(start, 0)
+    unvisited.Enqueue(start, 0)
+    seen.Add(start, Set.empty)
+    while unvisited.Count > 0 do
+        current <- unvisited.Dequeue()
+        let dist' = distances[current] + 1
+        let seen' = Set.add current seen[current]
+        let neighbours = 
             neighbours current
-            |> Seq.filter (fun n -> not (Set.contains n seen))
-            |> Seq.collect (fun n -> walk seen n)
-    walk Set.empty start
+            |> List.filter (fun n -> not (Set.contains n seen'))
+        for neighbour in neighbours do
+            match distances.TryGetValue neighbour with
+            | true, d ->
+                if dist' > d then
+                    distances[neighbour] <- dist'
+                    seen[neighbour] <- seen'
+                    unvisited.Enqueue(neighbour, dist')
+            | false, _ ->
+                distances[neighbour] <- dist'
+                seen[neighbour] <- seen'
+                unvisited.Enqueue(neighbour, dist')
+    distances[dest], Set.add dest seen[dest]
+
+let printPath neighbours seen =
+    for y = 0 to maxY do
+        for x = 0 to maxX do
+            if trailMap[y, x] <> '#' && neighbours (y, x) |> List.length > 2 then
+                Console.BackgroundColor <- ConsoleColor.Red
+            elif seen |> Set.contains (y, x) then
+                Console.BackgroundColor <- ConsoleColor.Green
+
+            printf "%c" trailMap[y, x]
+
+            Console.ResetColor()
+        printfn ""
 
 let part1 () =
-    allPaths start dest neighbours
-    |> Seq.map Set.count
-    |> Seq.max
+    artskjid start dest neighbours
+    |> tee (snd >> printPath neighbours)
+    |> fst
 
 printfn "Part 1: %A" (part1 ())
 
@@ -56,10 +87,9 @@ let neighbours2 (y, x) =
       if x < maxX then (y, x + 1) ]
     |> List.filter (fun (y, x) -> trailMap[y, x] <> '#')
 
-// Too slow
 let part2 () =
-    allPaths start dest neighbours2
-    |> Seq.map (Set.count >> tee (printfn "%d"))
-    |> Seq.max
+    artskjid start dest neighbours2
+    |> tee (snd >> printPath neighbours2)
+    |> fst
 
 printfn "Part 2: %A" (part2 ())
