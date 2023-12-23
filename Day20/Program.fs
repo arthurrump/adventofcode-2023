@@ -108,14 +108,29 @@ let part1 () =
 
 printfn "Part 1: %A" (part1 ())
 
-let part2() =
-    // TODO: This is too slow
-    let rec run count network =
-        let pulses, network = executePulse network startPulse
-        printfn "%d" count
-        if pulses |> List.exists (fun (Pulse (_, value, to')) -> not value && to' = "rx")
-        then count
-        else run (count + 1) network
-    run 1 network
+let rec gcd (a: bigint) (b: bigint) =
+    if b = 0I
+    then a 
+    else gcd b (a % b)
 
+let lcm a b =
+    (a / gcd a b) * b
+
+let part2() =
+    let beforeRx = network.Connections |> Map.findKey (fun _ tos -> tos |> List.contains "rx")
+    let beforeRxInputs =
+        network.Connections 
+        |> Map.filter (fun _ tos -> tos |> List.contains beforeRx)
+        |> Map.keys
+
+    let rec findSendHighCycle count network beforeRxInput =
+        let pulses, network = executePulse network startPulse
+        if pulses |> List.contains (Pulse (beforeRxInput, true, beforeRx))
+        then count
+        else findSendHighCycle (count + 1) network beforeRxInput
+
+    beforeRxInputs
+    |> Seq.map (findSendHighCycle 1 network >> bigint)
+    |> Seq.reduce lcm
+    
 printfn "Part 2: %A" (part2 ())
